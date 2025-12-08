@@ -1,0 +1,41 @@
+
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: truestate_db
+    environment:
+      POSTGRES_DB: truestate_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  backend:
+    build: ./backend
+    container_name: truestate_backend
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@db:5432/truestate_db
+    depends_on:
+      - db
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app 
+      - ./backend/data:/app/data      # mount your backend code into container
+
+  frontend:
+    build: ./frontend
+    container_name: truestate_frontend
+    depends_on:
+      - backend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app  
+       - /app/node_modules    # mount frontend code into container
+
+volumes:
+  db_data:

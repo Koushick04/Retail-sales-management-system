@@ -1,0 +1,20 @@
+# Ignore large dataset
+backend/data/sales_data.csv
+backend/data/*.csv
+
+# Python
+backend/__pycache__/
+backend/.pytest_cache/
+*.pyc
+
+# Virtual env
+venv/
+.env
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+
+# OS files
+.DS_Store
+Thumbs.db
