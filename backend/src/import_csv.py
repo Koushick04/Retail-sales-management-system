@@ -1,112 +1,118 @@
 import os
 import csv
-from datetime import datetime
-from .utils.db import SessionLocal
+from pathlib import Path
+
+from sqlalchemy.exc import SQLAlchemyError
+
+from .utils.db import SessionLocal, engine, Base
 from .models.sales_model import Sale
 
-CSV_PATH = "data/sales_data.csv"
-CHUNK_SIZE = 5000  # rows per batch
+# --------------------------------------------------------------------
+# 1. Figure out which CSV to use
+#    - LOCAL / Docker: use full data file data/sales_data.csv
+#    - RENDER: set env CSV_PATH=data/sales_data_render.csv
+# --------------------------------------------------------------------
 
+# /opt/render/project/src  (when running on Render)
+# C:\...\backend\src       (when running locally)
+SRC_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SRC_DIR.parent   # this is backend/ folder
 
-def parse_int(value, default=None):
-    try:
-        return int(value)
-    except (ValueError, TypeError):
-        return default
+DEFAULT_CSV = PROJECT_ROOT / "data" / "sales_data.csv"
 
+CSV_PATH = Path(os.getenv("CSV_PATH", str(DEFAULT_CSV)))
 
-def parse_float(value, default=None):
-    try:
-        return float(value)
-    except (ValueError, TypeError):
-        return default
+print("Working dir:", os.getcwd())
+print("Using CSV file:", CSV_PATH)
 
+# make sure tables exist (harmless if already created)
+Base.metadata.create_all(bind=engine)
 
-def parse_date(value, default=None):
-    if not value:
-        return default
-    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%m/%d/%Y"):
-        try:
-            return datetime.strptime(value, fmt).date()
-        except (ValueError, TypeError):
-            continue
-    return default
+BATCH_SIZE = 5000
 
 
 def import_sales():
-    print("Working dir:", os.getcwd())
-    print("Looking for CSV at:", os.path.abspath(CSV_PATH))
-    print("File exists?", os.path.exists(CSV_PATH))
+    session = SessionLocal()
+    total_inserted = 0
 
-    if not os.path.exists(CSV_PATH):
-        print("❌ CSV file not found. Check path and volume mapping.")
+    if not CSV_PATH.exists():
+        print("❌ CSV file not found:", CSV_PATH)
         return
 
-    db = SessionLocal()
-    total_rows = 0
-    batch = []
-
     try:
-        with open(CSV_PATH, newline="", encoding="utf-8") as f:
+        with CSV_PATH.open("r", encoding="utf-8", newline="") as f:
             reader = csv.DictReader(f)
+            batch = []
 
-            for i, row in enumerate(reader, start=1):
-                # Show first 3 rows for debugging
-                if i <= 3:
-                    print("Sample row", i, ":", row)
-
+            for row in reader:
+                # map CSV columns -> SQLAlchemy model fields
                 sale = Sale(
                     transaction_id=row["Transaction ID"],
-                    customer_id=row.get("Customer ID"),
-                    customer_name=row.get("Customer Name"),
-                    phone_number=row.get("Phone Number"),
-                    gender=row.get("Gender"),
-                    age=parse_int(row.get("Age")),
-                    customer_region=row.get("Customer Region"),
-
-                    product_id=row.get("Product ID"),
-                    product_name=row.get("Product Name"),
-                    brand=row.get("Brand"),
-                    product_category=row.get("Product Category"),
-                    tags=row.get("Tags") or "",
-
-                    quantity=parse_int(row.get("Quantity")),
-                    price_per_unit=parse_float(row.get("Price per Unit")),
-                    discount_percentage=parse_float(row.get("Discount Percentage")),
-                    total_amount=parse_float(row.get("Total Amount")),
-                    final_amount=parse_float(row.get("Final Amount")),
-
-                    date=parse_date(row.get("Date")),
-                    payment_method=row.get("Payment Method"),
-                    order_status=row.get("Order Status"),
-                    delivery_type=row.get("Delivery Type"),
-                    store_id=row.get("Store ID"),
-                    store_location=row.get("Store Location"),
-                    salesperson_id=row.get("Salesperson ID"),
-                    employee_name=row.get("Employee Name"),
+                    date=row["Date"],  # SQLAlchemy will cast string to date
+                    customer_id=row["Customer ID"],
+                    customer_name=row["Customer Name"],
+                    phone_number=row["Phone Number"],
+                    gender=row["Gender"],
+                    age=int(row["Age"]) if row["Age"] else None,
+                    customer_region=row["Customer Region"],
+                    customer_type=row["Customer Type"],
+                    product_id=row["Product ID"],
+                    product_name=row["Product Name"],
+                    brand=row["Brand"],
+                    product_category=row["Product Category"],
+                    tags=row["Tags"],
+                    quantity=int(row["Quantity"]) if row["Quantity"] else None,
+                    price_per_unit=float(row["Price per Unit"])
+                    if row["Price per Unit"]
+                    else None,
+                    discount_percentage=float(row["Discount Percentage"])
+                    if row["Discount Percentage"]
+                    else None,
+                    total_amount=float(row["Total Amount"])
+                    if row["Total Amount"]
+                    else None,
+                    final_amount=float(row["Final Amount"])
+                    if row["Final Amount"]
+                    else None,
+                    payment_method=row["Payment Method"],
+                    order_status=row["Order Status"],
+                    delivery_type=row["Delivery Type"],
+                    store_id=row["Store ID"],
+                    store_location=row["Store Location"],
+                    salesperson_id=row["Salesperson ID"],
+                    employee_name=row["Employee Name"],
                 )
 
                 batch.append(sale)
 
-                # When batch reaches CHUNK_SIZE, insert and clear it
-                if len(batch) >= CHUNK_SIZE:
-                    db.bulk_save_objects(batch)
-                    db.commit()
-                    total_rows += len(batch)
-                    print(f"Inserted rows so far: {total_rows}")
+                # insert batch
+                if len(batch) >= BATCH_SIZE:
+                    session.bulk_save_objects(batch)
+                    session.commit()
+                    total_inserted += len(batch)
+                    print(f"Inserted rows so far: {total_inserted}")
                     batch.clear()
 
-            # Insert any remaining rows
+            # insert any remaining rows
             if batch:
-                db.bulk_save_objects(batch)
-                db.commit()
-                total_rows += len(batch)
+                session.bulk_save_objects(batch)
+                session.commit()
+                total_inserted += len(batch)
+                print(f"Inserted rows so far: {total_inserted}")
 
-        print("✅ Import finished. Total rows inserted:", total_rows)
+        print("✅ Import finished. Total rows inserted:", total_inserted)
+
+    except SQLAlchemyError as e:
+        session.rollback()
+        print("❌ Database error during import:", e)
 
     finally:
-        db.close()
+        session.close()
+
+
+def main():
+    import_sales()
 
 
 if __name__ == "__main__":
-    import_sales()
+    main()
