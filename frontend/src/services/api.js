@@ -1,46 +1,42 @@
-import axios from "axios";
+// frontend/src/services/api.js
+// Simple, robust API client for TruEstate frontend.
+// Uses VITE_API_BASE_URL env var (default falls back to empty string).
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
-export async function fetchSales(filters) {
-  const {
-    search,
-    regions,
-    genders,
-    categories,
-    paymentMethods,
-    startDate,
-    endDate,
-    sortField,
-    sortOrder,
-    page,
-    limit,
-  } = filters;
-
-  const params = {
-    search: search || undefined,
-    page,
-    limit,
-    sort_field: sortField,
-    sort_order: sortOrder,
-    // Convert arrays to comma-separated strings only if they have values
-    regions: regions.length ? regions.join(",") : undefined,
-    gender: genders.length ? genders.join(",") : undefined,
-    categories: categories.length ? categories.join(",") : undefined,
-    payment_methods: paymentMethods.length
-      ? paymentMethods.join(",")
-      : undefined,
-    start_date: startDate || undefined,
-    end_date: endDate || undefined,
-  };
-  if (filters.tags && filters.tags.length) {
-  params.set("tags", filters.tags.join(","));
+function buildUrl(path, params = {}) {
+  const base = API_BASE || "";
+  const url = new URL(base + path, window.location.origin);
+  Object.entries(params).forEach(([k, v]) => {
+    if (v === undefined || v === null) return;
+    if (Array.isArray(v)) {
+      v.forEach(val => url.searchParams.append(k, val));
+    } else {
+      url.searchParams.set(k, String(v));
+    }
+  });
+  return url.toString();
 }
 
-const res = await fetch(`${API_BASE_URL}/api/sales?${params.toString()}`);
+export async function fetchSales({ page = 1, limit = 50, search = "", sort_field = "date", sort_order = "desc", filters = {} } = {}) {
+  // filters expected as object: { region: ["North","South"], category: ["Clothing"] } -> we append as repeated params
+  const params = { page, limit, sort_field, sort_order };
+  if (search) params.search = search;
 
+  // Flatten multi-select filters into URL params (e.g., tags=tag1&tags=tag2)
+  // We prefix filter keys with "filter_" to keep them distinct on backend (or match your backend expected names)
+  Object.entries(filters || {}).forEach(([k, v]) => {
+    if (!v) return;
+    params[k] = v;
+  });
 
-  const response = await axios.get(`${API_BASE_URL}/sales`, { params });
-  return response.data; // { data: [...], total: N }
+  const url = buildUrl("/api/sales/", params);
+  const res = await fetch(url, { method: "GET", credentials: "same-origin" });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`fetchSales failed: ${res.status} ${text}`);
+  }
+  return await res.json();
 }
+
+export default { fetchSales };
