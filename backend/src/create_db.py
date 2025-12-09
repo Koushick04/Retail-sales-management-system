@@ -1,5 +1,4 @@
 # backend/src/create_db.py
-
 from .utils.db import engine, Base
 from .models.sales_model import Sale
 
