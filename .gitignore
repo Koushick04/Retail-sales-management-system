@@ -3,3 +3,7 @@ backend/data/sales_data.csv
 
 # Allow smaller "render" dataset
 # (do NOT ignore backend/data/*.csv anymore)
+__pycache__/
+*.pyc
+.env
+git add .gitignore
